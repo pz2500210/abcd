@@ -28,7 +28,7 @@ show_banner() {
 # 显示主菜单
 show_main_menu() {
     echo -e "${CYAN}请选择操作:${NC}"
-    echo -e "${WHITE}1)${NC} ${GREEN}初始化服务器${NC} - 安装基础环境和工具"
+    echo -e "${WHITE}1)${NC} ${GREEN}安装${NC} - 安装基础环境和工具"
     echo -e "${WHITE}2)${NC} ${YELLOW}重新安装${NC} - 清理并重新安装"
     echo -e "${WHITE}3)${NC} ${RED}卸载${NC} - 删除所有安装的组件"
     echo -e "${WHITE}4)${NC} ${BLUE}查看配置信息${NC} - 显示详细配置"
