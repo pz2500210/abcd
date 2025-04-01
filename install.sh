@@ -8,7 +8,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # GitHub仓库信息
-REPO_URL="https://raw.githubusercontent.com/你的用户名/你的仓库名/main"
+REPO_URL="https://raw.githubusercontent.com/pz2500210/abcd/main"
 
 # 显示欢迎信息
 echo -e "${BLUE}=================================================${NC}"
