@@ -2282,6 +2282,7 @@ install_hysteria2() {
 }
 
 # 安装3X-UI
+# 安装3X-UI
 install_3xui() {
     clear
     echo -e "${BLUE}=================================================${NC}"
@@ -2296,32 +2297,94 @@ install_3xui() {
     echo "# 3X-UI安装日志" > $log_file
     echo "# 安装时间: $(date "+%Y-%m-%d %H:%M:%S")" >> $log_file
     
+    # 创建临时文件存储安装输出
+    local temp_output="/tmp/3xui_install_output.txt"
+    
     # 安装3X-UI
     echo -e "${YELLOW}开始安装3X-UI...${NC}"
-    #bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-    bash <(curl -Ls https://raw.githubusercontent.com/MHSanaei/3x-ui/refs/tags/v2.5.8/install.sh)
+    wget -N --no-check-certificate https://raw.githubusercontent.com/MHSanaei/3x-ui/refs/tags/v2.5.8/install.sh -O /tmp/3xui_install.sh
+    bash /tmp/3xui_install.sh | tee $temp_output
     
-    # 检查安装结果
-    if [ -f "/usr/local/x-ui/x-ui" ] || [ -f "/usr/bin/x-ui" ]; then
-        echo -e "${GREEN}3X-UI安装成功!${NC}"
-        
-        # 获取面板端口
-        PANEL_PORT=$(grep "^port:" /usr/local/x-ui/config.yaml 2>/dev/null | awk '{print $2}' || echo "2053")
-        
-        # 记录安装信息
-        echo "PANEL_PORT:$PANEL_PORT" >> $log_file
-        
-        # 更新主安装记录
-        update_main_install_log "3X-UI:${PANEL_PORT}"
-        
-        echo -e "${YELLOW}面板信息:${NC}"
-        echo -e "  面板地址: http://${PUBLIC_IPV4}:${PANEL_PORT}"
+    # 等待几秒确保服务启动
+    sleep 3
+    
+    # 从安装输出中提取关键信息
+    local access_url=$(grep "Access URL:" $temp_output | awk '{print $3}')
+    local username=$(grep "Username:" $temp_output | awk '{print $2}')
+    local password=$(grep "Password:" $temp_output | awk '{print $2}')
+    local port=$(grep "Port:" $temp_output | awk '{print $2}')
+    local webpath=$(grep "WebBasePath:" $temp_output | awk '{print $2}')
+    
+    # 使用x-ui settings命令获取准确的配置信息（作为备份）
+    echo -e "${YELLOW}获取面板配置信息...${NC}"
+    x_ui_settings=$(x-ui settings 2>/dev/null)
+    
+    # 从设置中提取信息
+    local panel_user=$(echo "$x_ui_settings" | grep -oP "username: \K.*" | head -1)
+    local panel_pass=$(echo "$x_ui_settings" | grep -oP "password: \K.*" | head -1)
+    local panel_port=$(echo "$x_ui_settings" | grep -oP "port: \K[0-9]+" | head -1)
+    local panel_path=$(echo "$x_ui_settings" | grep -oP "base_path: \K.*" | head -1)
+    
+    # 更新主安装记录
+    if [ ! -z "$port" ]; then
+        update_main_install_log "3X-UI:${port}"
+    elif [ ! -z "$panel_port" ]; then
+        update_main_install_log "3X-UI:${panel_port}"
+    else 
+        update_main_install_log "3X-UI"
+    fi
+    
+    # 显示面板信息
+    echo -e "${GREEN}3X-UI安装成功!${NC}"
+    echo -e "${YELLOW}面板信息:${NC}"
+    
+    # 优先使用从安装输出中提取的完整Access URL
+    if [ ! -z "$access_url" ]; then
+        echo -e "  面板地址: $access_url"
+    elif [ ! -z "$port" ] && [ ! -z "$webpath" ]; then
+        echo -e "  面板地址: http://${PUBLIC_IPV4}:${port}/${webpath}"
+    elif [ ! -z "$panel_port" ]; then
+        if [ ! -z "$panel_path" ] && [ "$panel_path" != "/" ]; then
+            if [[ $panel_path == /* ]]; then
+                echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}${panel_path}"
+            else
+                echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}/${panel_path}"
+            fi
+        else
+            echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}"
+        fi
+    else
+        echo -e "  面板地址: http://${PUBLIC_IPV4}:2053 (默认端口)"
+    fi
+    
+    # 优先使用从安装输出中提取的用户名密码
+    if [ ! -z "$username" ] && [ ! -z "$password" ]; then
+        echo -e "  用户名: $username"
+        echo -e "  密码: $password"
+    elif [ ! -z "$panel_user" ] && [ ! -z "$panel_pass" ]; then
+        echo -e "  用户名: $panel_user"
+        echo -e "  密码: $panel_pass"
+    else
         echo -e "  默认用户名: admin"
         echo -e "  默认密码: admin"
-        echo -e "  请登录后立即修改默认密码!"
-    else
-        echo -e "${RED}3X-UI安装失败，请检查网络或稍后再试${NC}"
     fi
+    
+    echo -e "  请登录后立即修改默认密码!"
+    
+    # 记录到日志文件
+    echo "ACCESS_URL: $access_url" >> $log_file
+    echo "USERNAME: $username" >> $log_file
+    echo "PASSWORD: $password" >> $log_file
+    echo "PORT: $port" >> $log_file
+    echo "WEBPATH: $webpath" >> $log_file
+    echo "PANEL_PORT: $panel_port" >> $log_file
+    echo "PANEL_PATH: $panel_path" >> $log_file
+    echo "PANEL_USER: $panel_user" >> $log_file
+    echo "PANEL_PASS: $panel_pass" >> $log_file
+    
+    # 清理临时文件
+    rm -f /tmp/3xui_install.sh
+    rm -f $temp_output
     
     read -p "按回车键继续..." temp
 }
