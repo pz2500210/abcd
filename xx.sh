@@ -1263,12 +1263,14 @@ firewall_settings() {
     echo -e "  1) 查看防火墙状态"
     echo -e "  2) 开启防火墙"
     echo -e "  3) 关闭防火墙"
-    echo -e "  4) 开放端口"
-    echo -e "  5) 关闭端口"
+    echo -e "  4) 开放端口 (IPv4)"
+    echo -e "  5) 关闭端口 (IPv4)"
     echo -e "  6) 自动配置应用端口"
+    echo -e "  7) 开放端口 (IPv6)"
+    echo -e "  8) 关闭端口 (IPv6)"
     echo -e "  0) 返回"
     
-    read -p "请选择 [0-6]: " FW_OPTION
+    read -p "请选择 [0-8]: " FW_OPTION
                 
     case $FW_OPTION in
         1) 
@@ -1277,8 +1279,14 @@ firewall_settings() {
                 ufw) ufw status ;;
                 firewalld) firewall-cmd --state ;;
                 iptables) 
-                    echo -e "${YELLOW}iptables规则:${NC}"
+                    echo -e "${YELLOW}iptables规则 (IPv4):${NC}"
                     iptables -L -n
+                    
+                    # 检查并显示IPv6规则
+                    if command -v ip6tables &>/dev/null; then
+                        echo -e "\n${YELLOW}ip6tables规则 (IPv6):${NC}"
+                        ip6tables -L -n
+                    fi
                     ;;
             esac
             ;;
@@ -1299,10 +1307,13 @@ firewall_settings() {
                     # 保存当前规则
                     iptables-save > /tmp/iptables.rules.bak
                     
-                    # 设置默认策略
-                    iptables -P INPUT ACCEPT
-                    iptables -P FORWARD ACCEPT
-                    iptables -P OUTPUT ACCEPT
+                    # 清空现有规则
+                    iptables -F
+                    iptables -X
+                    iptables -t nat -F
+                    iptables -t nat -X
+                    iptables -t mangle -F
+                    iptables -t mangle -X
                     
                     # 允许已建立的连接
                     iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
@@ -1310,7 +1321,7 @@ firewall_settings() {
                     # 允许本地回环接口
                     iptables -A INPUT -i lo -j ACCEPT
                     
-                    # 允许SSH
+                    # 允许SSH (重要！否则可能无法连接服务器)
                     iptables -A INPUT -p tcp --dport 22 -j ACCEPT
                     
                     # 允许常用端口
@@ -1320,11 +1331,47 @@ firewall_settings() {
                     # 自动添加已安装应用的端口
                     auto_add_app_ports "iptables"
                     
-                    # 设置默认拒绝
-                    # iptables -A INPUT -j DROP  # 暂时注释掉，避免用户被锁定
+                    # 重要：设置默认拒绝策略（这才是真正的防火墙）
+                    echo -e "${YELLOW}设置默认拒绝策略...${NC}"
+                    iptables -P INPUT DROP
+                    iptables -P FORWARD DROP
+                    # OUTPUT允许，使服务器可以主动发起连接
+                    iptables -P OUTPUT ACCEPT
+                    
+                    # 配置IPv6防火墙（如果可用）
+                    if command -v ip6tables >/dev/null 2>&1; then
+                        echo -e "${YELLOW}配置IPv6防火墙...${NC}"
+                        # 清空现有IPv6规则
+                        ip6tables -F
+                        ip6tables -X
+                        ip6tables -t mangle -F
+                        ip6tables -t mangle -X
+                        
+                        # 允许已建立的连接
+                        ip6tables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+                        
+                        # 允许本地回环接口
+                        ip6tables -A INPUT -i lo -j ACCEPT
+                        
+                        # 允许SSH (重要！)
+                        ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT
+                        
+                        # 允许常用端口
+                        ip6tables -A INPUT -p tcp --dport 80 -j ACCEPT
+                        ip6tables -A INPUT -p tcp --dport 443 -j ACCEPT
+                        
+                        # 自动添加已安装应用的端口到IPv6规则
+                        # 这里我们依赖auto_add_app_ports函数，它会同时处理IPv4和IPv6
+                        
+                        # 设置默认拒绝策略
+                        ip6tables -P INPUT DROP
+                        ip6tables -P FORWARD DROP
+                        ip6tables -P OUTPUT ACCEPT
+                    fi
                     
                     # 保存规则
                     if command -v iptables-save >/dev/null 2>&1; then
+                        echo -e "${YELLOW}保存防火墙规则...${NC}"
                         if [ -d "/etc/iptables" ]; then
                             iptables-save > /etc/iptables/rules.v4
                         else
@@ -1332,17 +1379,27 @@ firewall_settings() {
                             iptables-save > /etc/iptables/rules.v4
                         fi
                         
+                        # 保存IPv6规则
+                        if command -v ip6tables-save >/dev/null 2>&1 && command -v ip6tables >/dev/null 2>&1; then
+                            ip6tables-save > /etc/iptables/rules.v6
+                        fi
+                        
                         # 创建启动脚本确保规则持久化
                         cat > /etc/network/if-pre-up.d/iptables << 'EOF'
 #!/bin/bash
 /sbin/iptables-restore < /etc/iptables/rules.v4
+if [ -f /etc/iptables/rules.v6 ]; then
+    /sbin/ip6tables-restore < /etc/iptables/rules.v6
+fi
 EOF
                         chmod +x /etc/network/if-pre-up.d/iptables
+                        echo -e "${GREEN}防火墙规则已保存并设置开机自启${NC}"
                     else
                         echo -e "${RED}iptables-save命令不可用，无法保存规则${NC}"
                     fi
                     
-                    echo -e "${GREEN}iptables规则已应用${NC}"
+                    echo -e "${GREEN}防火墙已启用，提供了真正的安全保护${NC}"
+                    echo -e "${YELLOW}注意：现在只有特定端口允许连接，其他所有连接都会被拒绝${NC}"
                     ;;
             esac
             ;;
@@ -1363,10 +1420,26 @@ EOF
                     iptables -P FORWARD ACCEPT
                     iptables -P OUTPUT ACCEPT
                     
+                    # 如果支持IPv6，也清空IPv6规则
+                    if command -v ip6tables >/dev/null 2>&1; then
+                        ip6tables -F
+                        ip6tables -X
+                        ip6tables -t mangle -F
+                        ip6tables -t mangle -X
+                        ip6tables -P INPUT ACCEPT
+                        ip6tables -P FORWARD ACCEPT
+                        ip6tables -P OUTPUT ACCEPT
+                    fi
+                    
                     # 保存空规则
                     if command -v iptables-save >/dev/null 2>&1; then
                         if [ -d "/etc/iptables" ]; then
                             iptables-save > /etc/iptables/rules.v4
+                            
+                            # 保存IPv6规则
+                            if command -v ip6tables-save >/dev/null 2>&1; then
+                                ip6tables-save > /etc/iptables/rules.v6
+                            fi
                         fi
                     fi
                     
@@ -1374,8 +1447,8 @@ EOF
                     ;;
             esac
             ;;
-        4) 
-            echo -e "${YELLOW}请输入要开放的端口:${NC}"
+        4) # 开放IPv4端口
+            echo -e "${YELLOW}请输入要开放的IPv4端口:${NC}"
             read -p "端口: " OPEN_PORT
             
             if [ -z "$OPEN_PORT" ]; then
@@ -1388,7 +1461,7 @@ EOF
                 read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
                 PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
                 
-                echo -e "${YELLOW}开放端口 $OPEN_PORT...${NC}"
+                echo -e "${YELLOW}开放IPv4端口 $OPEN_PORT...${NC}"
                 case $firewall_type in
                     ufw) 
                         case $PROTOCOL_OPTION in
@@ -1426,11 +1499,11 @@ EOF
                         fi
                         ;;
                 esac
-                echo -e "${GREEN}端口 $OPEN_PORT 已开放${NC}"
+                echo -e "${GREEN}IPv4端口 $OPEN_PORT 已开放${NC}"
             fi
             ;;
-        5) 
-            echo -e "${YELLOW}请输入要关闭的端口:${NC}"
+        5) # 关闭IPv4端口
+            echo -e "${YELLOW}请输入要关闭的IPv4端口:${NC}"
             read -p "端口: " CLOSE_PORT
             
             if [ -z "$CLOSE_PORT" ]; then
@@ -1443,7 +1516,7 @@ EOF
                 read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
                 PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
                 
-                echo -e "${YELLOW}关闭端口 $CLOSE_PORT...${NC}"
+                echo -e "${YELLOW}关闭IPv4端口 $CLOSE_PORT...${NC}"
                 case $firewall_type in
                     ufw) 
                         case $PROTOCOL_OPTION in
@@ -1481,13 +1554,99 @@ EOF
                         fi
                         ;;
                 esac
-                echo -e "${GREEN}端口 $CLOSE_PORT 已关闭${NC}"
+                echo -e "${GREEN}IPv4端口 $CLOSE_PORT 已关闭${NC}"
             fi
             ;;
-        6)
+        6) # 自动配置应用端口
             echo -e "${YELLOW}自动配置已安装应用的端口...${NC}"
             auto_add_app_ports "$firewall_type"
             echo -e "${GREEN}应用端口已配置完成${NC}"
+            ;;
+        7) # 开放IPv6端口
+            # 检查是否支持IPv6
+            if ! command -v ip6tables &>/dev/null; then
+                echo -e "${RED}系统不支持IPv6或ip6tables命令不可用${NC}"
+                read -p "按回车键继续..." temp
+                firewall_settings
+                return
+            fi
+            
+            echo -e "${YELLOW}请输入要开放的IPv6端口:${NC}"
+            read -p "端口: " OPEN_PORT
+            
+            if [ -z "$OPEN_PORT" ]; then
+                echo -e "${RED}端口不能为空${NC}"
+            else
+                echo -e "${YELLOW}请选择协议:${NC}"
+                echo -e "  1) TCP"
+                echo -e "  2) UDP"
+                echo -e "  3) TCP+UDP (两者都开放)"
+                read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
+                PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
+                
+                echo -e "${YELLOW}开放IPv6端口 $OPEN_PORT...${NC}"
+                case $PROTOCOL_OPTION in
+                    1) ip6tables -A INPUT -p tcp --dport $OPEN_PORT -j ACCEPT ;;
+                    2) ip6tables -A INPUT -p udp --dport $OPEN_PORT -j ACCEPT ;;
+                    *) 
+                        ip6tables -A INPUT -p tcp --dport $OPEN_PORT -j ACCEPT
+                        ip6tables -A INPUT -p udp --dport $OPEN_PORT -j ACCEPT
+                        ;;
+                esac
+                
+                # 保存规则
+                if command -v ip6tables-save >/dev/null 2>&1; then
+                    if [ -d "/etc/iptables" ]; then
+                        mkdir -p /etc/iptables
+                        ip6tables-save > /etc/iptables/rules.v6
+                    fi
+                fi
+                
+                echo -e "${GREEN}IPv6端口 $OPEN_PORT 已开放${NC}"
+            fi
+            ;;
+        8) # 关闭IPv6端口
+            # 检查是否支持IPv6
+            if ! command -v ip6tables &>/dev/null; then
+                echo -e "${RED}系统不支持IPv6或ip6tables命令不可用${NC}"
+                read -p "按回车键继续..." temp
+                firewall_settings
+                return
+            fi
+            
+            echo -e "${YELLOW}请输入要关闭的IPv6端口:${NC}"
+            read -p "端口: " CLOSE_PORT
+            
+            if [ -z "$CLOSE_PORT" ]; then
+                echo -e "${RED}端口不能为空${NC}"
+            else
+                echo -e "${YELLOW}请选择协议:${NC}"
+                echo -e "  1) TCP"
+                echo -e "  2) UDP"
+                echo -e "  3) TCP+UDP (两者都关闭)"
+                read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
+                PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
+                
+                echo -e "${YELLOW}关闭IPv6端口 $CLOSE_PORT...${NC}"
+                case $PROTOCOL_OPTION in
+                    1) ip6tables -D INPUT -p tcp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null ;;
+                    2) ip6tables -D INPUT -p udp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null ;;
+                    *) 
+                        ip6tables -D INPUT -p tcp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null
+                        ip6tables -D INPUT -p udp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null
+                        ;;
+                esac
+                
+                # 保存规则
+                if command -v ip6tables-save >/dev/null 2>&1; then
+                    if [ -d "/etc/iptables" ]; then
+                        mkdir -p /etc/iptables
+                        ip6tables-save > /etc/iptables/rules.v6
+                    fi
+                fi
+                
+                echo -e "${GREEN}IPv6端口 $CLOSE_PORT 已关闭${NC}"
+            fi
             ;;
         0) 
             return
@@ -3065,6 +3224,11 @@ install_certificate() {
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}证书安装成功${NC}"
+        
+        # 设置适当的权限
+        chmod 644 "$CERT_FILE"
+        chmod 600 "$KEY_FILE"
+        echo -e "${GREEN}证书权限已设置${NC}"
         
         # 更新主安装记录，包括证书位置
         update_main_install_log "SSL证书:$domain"
