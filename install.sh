@@ -7,7 +7,88 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+echo -e "${BLUE}=================================================${NC}"
+echo -e "${GREEN}服务器管理系统安装程序${NC}"
+echo -e "${BLUE}=================================================${NC}"
+
+# 检查是否为root用户，如果不是则提供切换选项
+if [ "$(id -u)" != "0" ]; then
+    echo -e "${YELLOW}当前不是以root用户运行脚本${NC}"
+    echo -e "${YELLOW}您有以下选择:${NC}"
+    echo -e "1) 使用sudo临时获取root权限继续安装"
+    echo -e "2) 切换到root账户并设置密码"
+    echo -e "3) 退出安装"
+    
+    read -p "请选择 [1-3]: " ROOT_OPTION
+    
+    case $ROOT_OPTION in
+        1)
+            echo -e "${YELLOW}尝试使用sudo继续安装...${NC}"
+            if command -v sudo &> /dev/null; then
+                exec sudo bash "$0" "$@"
+            else
+                echo -e "${RED}sudo命令不可用，无法继续${NC}"
+                echo -e "${YELLOW}请选择切换到root账户或退出安装${NC}"
+                echo -e "1) 切换到root账户并设置密码"
+                echo -e "2) 退出安装"
+                read -p "请选择 [1-2]: " SUB_OPTION
+                if [ "$SUB_OPTION" = "1" ]; then
+                    # 尝试切换到root用户
+                    echo -e "${YELLOW}尝试切换到root账户...${NC}"
+                else
+                    echo -e "${RED}安装已取消${NC}"
+                    exit 1
+                fi
+            fi
+            ;;
+        2)
+            # 尝试切换到root用户并设置密码
+            echo -e "${YELLOW}尝试切换到root账户...${NC}"
+            ;;
+        3)
+            echo -e "${RED}安装已取消${NC}"
+            exit 1
+            ;;
+        *)
+            echo -e "${RED}无效选项，安装已取消${NC}"
+            exit 1
+            ;;
+    esac
+    
+    # 如果选择了切换到root用户
+    if [ "$ROOT_OPTION" = "2" ] || ([ "$ROOT_OPTION" = "1" ] && [ "$SUB_OPTION" = "1" ]); then
+        echo -e "${YELLOW}是否需要为root账户设置密码? (y/n)${NC}"
+        read -p "选择 [y/n]: " SET_ROOT_PASS
+        
+        if [[ $SET_ROOT_PASS =~ ^[Yy]$ ]]; then
+            echo -e "${YELLOW}请设置root账户密码:${NC}"
+            if command -v sudo &> /dev/null; then
+                sudo passwd root
+            else
+                echo -e "${RED}无法设置root密码，sudo命令不可用${NC}"
+                echo -e "${RED}请联系服务器管理员或使用root账户重新运行此脚本${NC}"
+                exit 1
+            fi
+        fi
+        
+        # 尝试切换到root账户
+        echo -e "${YELLOW}正在切换到root账户...${NC}"
+        if command -v sudo &> /dev/null; then
+            exec sudo su -c "bash $0 $@"
+        else
+            echo -e "${RED}无法切换到root账户，sudo命令不可用${NC}"
+            echo -e "${RED}请联系服务器管理员或使用root账户重新运行此脚本${NC}"
+            exit 1
+        fi
+    fi
+    
+    # 如果代码执行到这里，说明切换失败
+    echo -e "${RED}无法以root权限运行，安装已取消${NC}"
+    exit 1
+fi
+
 # 自动检测GitHub仓库URL
+echo -e "${YELLOW}检测GitHub仓库URL...${NC}"
 SCRIPT_URL=$(curl -s -I https://raw.githubusercontent.com/pz2500210/abcd/main/xx.sh | grep -i "location" | cut -d' ' -f2 | tr -d '\r')
 if [[ -n "$SCRIPT_URL" && "$SCRIPT_URL" == *"refs/heads"* ]]; then
     REPO_URL="https://raw.githubusercontent.com/pz2500210/abcd/refs/heads/main"
@@ -15,16 +96,6 @@ if [[ -n "$SCRIPT_URL" && "$SCRIPT_URL" == *"refs/heads"* ]]; then
 else
     REPO_URL="https://raw.githubusercontent.com/pz2500210/abcd/main"
     echo -e "${YELLOW}使用URL: ${REPO_URL}${NC}"
-fi
-
-echo -e "${BLUE}=================================================${NC}"
-echo -e "${GREEN}服务器管理系统安装程序${NC}"
-echo -e "${BLUE}=================================================${NC}"
-
-# 检查是否为root用户
-if [ "$(id -u)" != "0" ]; then
-    echo -e "${RED}此脚本必须以root用户身份运行${NC}"
-    exit 1
 fi
 
 # 检查curl命令是否可用
@@ -78,12 +149,8 @@ echo -e "${YELLOW}下载xx.sh...${NC}"
 curl -s -o xx.sh ${REPO_URL}/xx.sh
 echo "xx.sh 大小: $(du -b xx.sh | cut -f1) 字节"
 
-echo -e "${YELLOW}下载install_panel.sh...${NC}"
-curl -s -o install_panel.sh ${REPO_URL}/install_panel.sh
-echo "install_panel.sh 大小: $(du -b install_panel.sh | cut -f1) 字节"
-
 # 检查文件是否下载成功
-if [ ! -s server_init.sh ] || [ ! -s cleanup.sh ] || [ ! -s xx.sh ] || [ ! -s install_panel.sh ]; then
+if [ ! -s server_init.sh ] || [ ! -s cleanup.sh ] || [ ! -s xx.sh ]; then
     echo -e "${RED}文件下载失败，尝试备用URL...${NC}"
     
     # 尝试备用URL
@@ -98,10 +165,9 @@ if [ ! -s server_init.sh ] || [ ! -s cleanup.sh ] || [ ! -s xx.sh ] || [ ! -s in
     curl -s -o server_init.sh ${REPO_URL}/server_init.sh
     curl -s -o cleanup.sh ${REPO_URL}/cleanup.sh
     curl -s -o xx.sh ${REPO_URL}/xx.sh
-    curl -s -o install_panel.sh ${REPO_URL}/install_panel.sh
     
     # 再次检查
-    if [ ! -s server_init.sh ] || [ ! -s cleanup.sh ] || [ ! -s xx.sh ] || [ ! -s install_panel.sh ]; then
+    if [ ! -s server_init.sh ] || [ ! -s cleanup.sh ] || [ ! -s xx.sh ]; then
         echo -e "${RED}文件下载失败，请检查网络连接或仓库地址${NC}"
         exit 1
     fi
@@ -114,16 +180,15 @@ echo -e "${YELLOW}复制文件到系统...${NC}"
 cp -f server_init.sh /root/
 cp -f cleanup.sh /root/
 cp -f xx.sh /usr/local/bin/
-cp -f install_panel.sh /root/
 
 # 设置执行权限
 chmod +x /root/server_init.sh
 chmod +x /root/cleanup.sh
 chmod +x /usr/local/bin/xx.sh
-chmod +x /root/install_panel.sh
 
-# 创建xx命令链接
-echo -e "${YELLOW}创建xx命令...${NC}"
+# 整合自install_panel.sh的功能 - 创建xx命令链接
+echo -e "${YELLOW}创建服务器管理面板脚本...${NC}"
+echo -e "${YELLOW}创建快捷命令 'xx'...${NC}"
 ln -sf /usr/local/bin/xx.sh /usr/local/bin/xx
 chmod +x /usr/local/bin/xx
 
@@ -135,7 +200,33 @@ touch /root/.sb_logs/main_install.log
 cd ~
 rm -rf /tmp/server-setup
 
-echo -e "${GREEN}安装完成！正在启动服务器管理面板...${NC}"
+echo -e "${BLUE}=================================================${NC}"
+echo -e "${GREEN}安装完成！请记录以下重要信息：${NC}"
+echo -e "${BLUE}=================================================${NC}"
+
+# 显示SSH登录信息
+SSH_PORT=$(grep "^Port " /etc/ssh/sshd_config | awk '{print $2}')
+[ -z "$SSH_PORT" ] && SSH_PORT=22
+
+echo -e "${YELLOW}【SSH登录信息】${NC}"
+echo -e "用户名: ${GREEN}root${NC}"
+echo -e "密码: ${GREEN}$(您在安装过程中设置的密码)${NC}"
+echo -e "SSH端口: ${GREEN}${SSH_PORT}${NC}"
+echo -e "服务器IP: ${GREEN}$(curl -s ifconfig.me || curl -s ip.sb || curl -s ipinfo.io/ip || hostname -I | awk '{print $1}')${NC}"
+
+echo -e "\n${RED}警告: 请立即将以上信息保存到安全的地方！${NC}"
+echo -e "${RED}如果忘记密码，您可能需要重置服务器。${NC}"
+echo -e "${YELLOW}注意: Linux系统中无法直接查询已设置的密码。${NC}"
+
+# 提示用户确认
+echo -e "\n${BLUE}=================================================${NC}"
+echo -e "${GREEN}服务器管理面板安装完成!${NC}"
+echo -e "${YELLOW}使用方法:${NC}"
+echo -e "  输入 ${GREEN}xx${NC} 命令启动管理面板"
+echo -e "${BLUE}=================================================${NC}"
+read -p "按回车键继续并启动服务器管理面板..." temp
+
+echo -e "${GREEN}正在启动服务器管理面板...${NC}"
 
 # 直接启动XX面板
 xx 
