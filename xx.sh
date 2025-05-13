@@ -69,12 +69,13 @@ show_main_menu() {
     echo -e "  ${GREEN}1.${NC} 安装Hysteria-2"
     echo -e "  ${GREEN}2.${NC} 安装3X-UI"
     echo -e "  ${GREEN}3.${NC} 安装Sing-box-yg"
-    echo -e "  ${GREEN}4.${NC} 初始化服务器"
-    echo -e "  ${GREEN}5.${NC} 卸载"
+    echo -e "  ${GREEN}4.${NC} 安装基础环境和工具"
+    echo -e "  ${GREEN}5.${NC} 防火墙设置"
     echo -e "  ${GREEN}6.${NC} 查看配置"
     echo -e "  ${GREEN}7.${NC} 系统工具"
     echo -e "  ${GREEN}8.${NC} 安装SSL证书"
     echo -e "  ${GREEN}9.${NC} DNS认证管理"
+    echo -e "  ${GREEN}10.${NC} 卸载"
     echo -e "  ${GREEN}0.${NC} 退出"
     echo -e "${BLUE}=================================================${NC}"
 }
@@ -1141,23 +1142,21 @@ system_tools() {
     echo -e "${YELLOW}请选择工具:${NC}"
     echo -e "  1) 系统信息"
     echo -e "  2) 网络测速"
-    echo -e "  3) 防火墙设置"
-    echo -e "  4) 端口管理"
-    echo -e "  5) 系统更新"
-    echo -e "  6) 重启系统"
-    echo -e "  7) 关闭系统"
+    echo -e "  3) 端口管理"
+    echo -e "  4) 系统更新"
+    echo -e "  5) 重启系统"
+    echo -e "  6) 关闭系统"
     echo -e "  0) 返回主菜单"
     
-    read -p "请选择 [0-7]: " TOOL_OPTION
+    read -p "请选择 [0-6]: " TOOL_OPTION
     
     case $TOOL_OPTION in
         1) view_system_info ;;
         2) network_speedtest ;;
-        3) firewall_settings ;;
-        4) port_management ;;
-        5) system_update ;;
-        6) reboot_system ;;
-        7) shutdown_system ;;
+        3) port_management ;;
+        4) system_update ;;
+        5) reboot_system ;;
+        6) shutdown_system ;;
         0) return ;;
         *) 
             echo -e "${RED}无效选项，请重试${NC}"
@@ -1230,19 +1229,28 @@ network_speedtest() {
 
 # 防火墙设置
 firewall_settings() {
-                clear
-                echo -e "${BLUE}=================================================${NC}"
+    clear
+    echo -e "${BLUE}=================================================${NC}"
     echo -e "${GREEN}防火墙设置:${NC}"
-                echo -e "${BLUE}=================================================${NC}"
+    echo -e "${BLUE}=================================================${NC}"
                 
     # 检测防火墙类型
     local firewall_type=""
     if command -v ufw &>/dev/null; then
         firewall_type="ufw"
-    elif command -v firewalld &>/dev/null; then
+    elif command -v firewall-cmd &>/dev/null; then
         firewall_type="firewalld"
     elif command -v iptables &>/dev/null; then
-        firewall_type="iptables"
+        # 检查是否有ufw或firewalld作为前端
+        if systemctl is-active ufw &>/dev/null || systemctl is-active firewalld &>/dev/null; then
+            if systemctl is-active ufw &>/dev/null; then
+                firewall_type="ufw"
+            else
+                firewall_type="firewalld"
+            fi
+        else
+            firewall_type="iptables"
+        fi
     else
         echo -e "${RED}未检测到支持的防火墙${NC}"
         read -p "按回车键继续..." temp
@@ -1257,25 +1265,85 @@ firewall_settings() {
     echo -e "  3) 关闭防火墙"
     echo -e "  4) 开放端口"
     echo -e "  5) 关闭端口"
+    echo -e "  6) 自动配置应用端口"
     echo -e "  0) 返回"
     
-    read -p "请选择 [0-5]: " FW_OPTION
+    read -p "请选择 [0-6]: " FW_OPTION
                 
-                case $FW_OPTION in
+    case $FW_OPTION in
         1) 
             echo -e "${YELLOW}防火墙状态:${NC}"
             case $firewall_type in
                 ufw) ufw status ;;
                 firewalld) firewall-cmd --state ;;
-                iptables) iptables -L -n ;;
+                iptables) 
+                    echo -e "${YELLOW}iptables规则:${NC}"
+                    iptables -L -n
+                    ;;
             esac
             ;;
         2) 
             echo -e "${YELLOW}开启防火墙...${NC}"
             case $firewall_type in
-                ufw) ufw enable ;;
-                firewalld) systemctl start firewalld && systemctl enable firewalld ;;
-                iptables) systemctl start iptables && systemctl enable iptables ;;
+                ufw) 
+                    ufw enable
+                    ;;
+                firewalld) 
+                    systemctl start firewalld && systemctl enable firewalld
+                    ;;
+                iptables) 
+                    # 在iptables模式下，不尝试启动服务，而是直接应用规则
+                    echo -e "${YELLOW}在纯iptables模式下，需要手动设置规则...${NC}"
+                    echo -e "${YELLOW}应用基本规则...${NC}"
+                    
+                    # 保存当前规则
+                    iptables-save > /tmp/iptables.rules.bak
+                    
+                    # 设置默认策略
+                    iptables -P INPUT ACCEPT
+                    iptables -P FORWARD ACCEPT
+                    iptables -P OUTPUT ACCEPT
+                    
+                    # 允许已建立的连接
+                    iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+                    
+                    # 允许本地回环接口
+                    iptables -A INPUT -i lo -j ACCEPT
+                    
+                    # 允许SSH
+                    iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+                    
+                    # 允许常用端口
+                    iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+                    iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+                    
+                    # 自动添加已安装应用的端口
+                    auto_add_app_ports "iptables"
+                    
+                    # 设置默认拒绝
+                    # iptables -A INPUT -j DROP  # 暂时注释掉，避免用户被锁定
+                    
+                    # 保存规则
+                    if command -v iptables-save >/dev/null 2>&1; then
+                        if [ -d "/etc/iptables" ]; then
+                            iptables-save > /etc/iptables/rules.v4
+                        else
+                            mkdir -p /etc/iptables
+                            iptables-save > /etc/iptables/rules.v4
+                        fi
+                        
+                        # 创建启动脚本确保规则持久化
+                        cat > /etc/network/if-pre-up.d/iptables << 'EOF'
+#!/bin/bash
+/sbin/iptables-restore < /etc/iptables/rules.v4
+EOF
+                        chmod +x /etc/network/if-pre-up.d/iptables
+                    else
+                        echo -e "${RED}iptables-save命令不可用，无法保存规则${NC}"
+                    fi
+                    
+                    echo -e "${GREEN}iptables规则已应用${NC}"
+                    ;;
             esac
             ;;
         3) 
@@ -1283,7 +1351,27 @@ firewall_settings() {
             case $firewall_type in
                 ufw) ufw disable ;;
                 firewalld) systemctl stop firewalld && systemctl disable firewalld ;;
-                iptables) systemctl stop iptables && systemctl disable iptables ;;
+                iptables) 
+                    # 清空所有规则
+                    iptables -F
+                    iptables -X
+                    iptables -t nat -F
+                    iptables -t nat -X
+                    iptables -t mangle -F
+                    iptables -t mangle -X
+                    iptables -P INPUT ACCEPT
+                    iptables -P FORWARD ACCEPT
+                    iptables -P OUTPUT ACCEPT
+                    
+                    # 保存空规则
+                    if command -v iptables-save >/dev/null 2>&1; then
+                        if [ -d "/etc/iptables" ]; then
+                            iptables-save > /etc/iptables/rules.v4
+                        fi
+                    fi
+                    
+                    echo -e "${GREEN}已清空所有iptables规则${NC}"
+                    ;;
             esac
             ;;
         4) 
@@ -1293,11 +1381,50 @@ firewall_settings() {
             if [ -z "$OPEN_PORT" ]; then
                 echo -e "${RED}端口不能为空${NC}"
             else
+                echo -e "${YELLOW}请选择协议:${NC}"
+                echo -e "  1) TCP"
+                echo -e "  2) UDP"
+                echo -e "  3) TCP+UDP (两者都开放)"
+                read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
+                PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
+                
                 echo -e "${YELLOW}开放端口 $OPEN_PORT...${NC}"
                 case $firewall_type in
-                    ufw) ufw allow $OPEN_PORT ;;
-                    firewalld) firewall-cmd --permanent --add-port=$OPEN_PORT/tcp && firewall-cmd --permanent --add-port=$OPEN_PORT/udp && firewall-cmd --reload ;;
-                    iptables) iptables -A INPUT -p tcp --dport $OPEN_PORT -j ACCEPT && iptables -A INPUT -p udp --dport $OPEN_PORT -j ACCEPT && iptables-save > /etc/iptables/rules.v4 ;;
+                    ufw) 
+                        case $PROTOCOL_OPTION in
+                            1) ufw allow $OPEN_PORT/tcp ;;
+                            2) ufw allow $OPEN_PORT/udp ;;
+                            *) ufw allow $OPEN_PORT/tcp && ufw allow $OPEN_PORT/udp ;;
+                        esac
+                        ;;
+                    firewalld) 
+                        case $PROTOCOL_OPTION in
+                            1) firewall-cmd --permanent --add-port=$OPEN_PORT/tcp ;;
+                            2) firewall-cmd --permanent --add-port=$OPEN_PORT/udp ;;
+                            *) 
+                                firewall-cmd --permanent --add-port=$OPEN_PORT/tcp 
+                                firewall-cmd --permanent --add-port=$OPEN_PORT/udp 
+                                ;;
+                        esac
+                        firewall-cmd --reload 
+                        ;;
+                    iptables) 
+                        case $PROTOCOL_OPTION in
+                            1) iptables -A INPUT -p tcp --dport $OPEN_PORT -j ACCEPT ;;
+                            2) iptables -A INPUT -p udp --dport $OPEN_PORT -j ACCEPT ;;
+                            *) 
+                                iptables -A INPUT -p tcp --dport $OPEN_PORT -j ACCEPT
+                                iptables -A INPUT -p udp --dport $OPEN_PORT -j ACCEPT
+                                ;;
+                        esac
+                        
+                        # 保存规则
+                        if command -v iptables-save >/dev/null 2>&1; then
+                            if [ -d "/etc/iptables" ]; then
+                                iptables-save > /etc/iptables/rules.v4
+                            fi
+                        fi
+                        ;;
                 esac
                 echo -e "${GREEN}端口 $OPEN_PORT 已开放${NC}"
             fi
@@ -1309,28 +1436,350 @@ firewall_settings() {
             if [ -z "$CLOSE_PORT" ]; then
                 echo -e "${RED}端口不能为空${NC}"
             else
+                echo -e "${YELLOW}请选择协议:${NC}"
+                echo -e "  1) TCP"
+                echo -e "  2) UDP"
+                echo -e "  3) TCP+UDP (两者都关闭)"
+                read -p "选择 [1-3] (默认: 3): " PROTOCOL_OPTION
+                PROTOCOL_OPTION=${PROTOCOL_OPTION:-3}
+                
                 echo -e "${YELLOW}关闭端口 $CLOSE_PORT...${NC}"
                 case $firewall_type in
-                    ufw) ufw delete allow $CLOSE_PORT ;;
-                    firewalld) firewall-cmd --permanent --remove-port=$CLOSE_PORT/tcp && firewall-cmd --permanent --remove-port=$CLOSE_PORT/udp && firewall-cmd --reload ;;
-                    iptables) iptables -D INPUT -p tcp --dport $CLOSE_PORT -j ACCEPT && iptables -D INPUT -p udp --dport $CLOSE_PORT -j ACCEPT && iptables-save > /etc/iptables/rules.v4 ;;
+                    ufw) 
+                        case $PROTOCOL_OPTION in
+                            1) ufw delete allow $CLOSE_PORT/tcp ;;
+                            2) ufw delete allow $CLOSE_PORT/udp ;;
+                            *) ufw delete allow $CLOSE_PORT/tcp && ufw delete allow $CLOSE_PORT/udp ;;
+                        esac
+                        ;;
+                    firewalld) 
+                        case $PROTOCOL_OPTION in
+                            1) firewall-cmd --permanent --remove-port=$CLOSE_PORT/tcp ;;
+                            2) firewall-cmd --permanent --remove-port=$CLOSE_PORT/udp ;;
+                            *) 
+                                firewall-cmd --permanent --remove-port=$CLOSE_PORT/tcp 
+                                firewall-cmd --permanent --remove-port=$CLOSE_PORT/udp 
+                                ;;
+                        esac
+                        firewall-cmd --reload 
+                        ;;
+                    iptables) 
+                        case $PROTOCOL_OPTION in
+                            1) iptables -D INPUT -p tcp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null ;;
+                            2) iptables -D INPUT -p udp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null ;;
+                            *) 
+                                iptables -D INPUT -p tcp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null
+                                iptables -D INPUT -p udp --dport $CLOSE_PORT -j ACCEPT 2>/dev/null
+                                ;;
+                        esac
+                        
+                        # 保存规则
+                        if command -v iptables-save >/dev/null 2>&1; then
+                            if [ -d "/etc/iptables" ]; then
+                                iptables-save > /etc/iptables/rules.v4
+                            fi
+                        fi
+                        ;;
                 esac
                 echo -e "${GREEN}端口 $CLOSE_PORT 已关闭${NC}"
             fi
             ;;
+        6)
+            echo -e "${YELLOW}自动配置已安装应用的端口...${NC}"
+            auto_add_app_ports "$firewall_type"
+            echo -e "${GREEN}应用端口已配置完成${NC}"
+            ;;
         0) 
-            system_tools
             return
             ;;
         *) 
             echo -e "${RED}无效选项，请重试${NC}"
             sleep 2
             firewall_settings
-                        ;;
-                esac
+            ;;
+    esac
                 
-                read -p "按回车键继续..." temp
+    read -p "按回车键继续..." temp
     firewall_settings
+}
+
+# 检查端口规则是否已存在，避免重复添加
+port_rule_exists() {
+    local port=$1
+    local protocol=$2  # tcp or udp
+    
+    if iptables -L INPUT -n | grep -q "$protocol dpt:$port"; then
+        return 0  # 规则已存在
+    else
+        return 1  # 规则不存在
+    fi
+}
+
+# 增强型自动配置应用端口函数，可以处理删除和修改的端口
+auto_add_app_ports() {
+    local firewall_type=$1
+    local ports_added=0
+    local active_ports=()
+    
+    echo -e "${YELLOW}检测已安装应用的端口...${NC}"
+    
+    # 创建临时文件存储当前活跃端口
+    local temp_active_ports="/tmp/active_ports.txt"
+    touch $temp_active_ports
+    
+    # 使用netstat直接检测应用端口
+    echo -e "${YELLOW}从运行进程中检测端口...${NC}"
+    
+    # 检测所有活跃的端口并记录
+    collect_active_ports() {
+        # 检测x-ui面板端口
+        X_UI_PORTS=$(netstat -tulpn 2>/dev/null | grep 'x-ui' | awk '{print $4}' | grep -o '[0-9]*$' | sort -u)
+        for port in $X_UI_PORTS; do
+            if [ ! -z "$port" ]; then
+                echo "$port" >> $temp_active_ports
+                echo -e "${GREEN}检测到3X-UI面板端口: ${port}${NC}"
+                active_ports+=("$port")
+            fi
+        done
+        
+        # 检测xray入站端口
+        XRAY_PORTS=$(netstat -tulpn 2>/dev/null | grep -E 'xray|v2ray' | awk '{print $4}' | grep -o '[0-9]*$' | sort -u)
+        for port in $XRAY_PORTS; do
+            if [ ! -z "$port" ]; then
+                echo "$port" >> $temp_active_ports
+                echo -e "${GREEN}检测到Xray入站端口: ${port}${NC}"
+                active_ports+=("$port")
+            fi
+        done
+        
+        # 检测hysteria端口
+        HYSTERIA_PORTS=$(netstat -tulpn 2>/dev/null | grep -E 'hysteria' | awk '{print $4}' | grep -o '[0-9]*$' | sort -u)
+        for port in $HYSTERIA_PORTS; do
+            if [ ! -z "$port" ]; then
+                echo "$port" >> $temp_active_ports
+                echo -e "${GREEN}检测到Hysteria端口: ${port}${NC}"
+                active_ports+=("$port")
+            fi
+        done
+        
+        # 检查3X-UI中配置的入站规则端口
+        if [ -f "/usr/local/x-ui/db/x-ui.db" ]; then
+            echo -e "${YELLOW}检测3X-UI入站规则端口...${NC}"
+            # 如果有sqlite3命令可用
+            if command -v sqlite3 &>/dev/null; then
+                INBOUND_PORTS=$(sqlite3 /usr/local/x-ui/db/x-ui.db "SELECT port FROM inbounds WHERE enable = 1;" 2>/dev/null)
+                for port in $INBOUND_PORTS; do
+                    if [ ! -z "$port" ]; then
+                        echo "$port" >> $temp_active_ports
+                        echo -e "${GREEN}检测到入站规则端口: ${port}${NC}"
+                        active_ports+=("$port")
+                    fi
+                done
+            else
+                echo -e "${YELLOW}未找到sqlite3命令，尝试安装...${NC}"
+                # 尝试安装sqlite3
+                if [ -f /etc/debian_version ]; then
+                    apt update && apt install -y sqlite3
+                elif [ -f /etc/redhat-release ]; then
+                    yum install -y sqlite
+                fi
+                
+                # 重新尝试
+                if command -v sqlite3 &>/dev/null; then
+                    INBOUND_PORTS=$(sqlite3 /usr/local/x-ui/db/x-ui.db "SELECT port FROM inbounds WHERE enable = 1;" 2>/dev/null)
+                    for port in $INBOUND_PORTS; do
+                        if [ ! -z "$port" ]; then
+                            echo "$port" >> $temp_active_ports
+                            echo -e "${GREEN}检测到入站规则端口: ${port}${NC}"
+                            active_ports+=("$port")
+                        fi
+                    done
+                else
+                    echo -e "${YELLOW}无法安装sqlite3，使用备用方法检测端口...${NC}"
+                fi
+            fi
+        fi
+        
+        # 检查Hysteria-2配置文件
+        if [ -f "/etc/hysteria/config.json" ]; then
+            # 从config.json中提取端口
+            HY2_PORT=$(grep -o '"listen": "[^"]*"' /etc/hysteria/config.json | grep -o '[0-9]*')
+            if [ -z "$HY2_PORT" ]; then
+                # 尝试另一种格式
+                HY2_PORT=$(grep -o '"listen": ":.*"' /etc/hysteria/config.json | grep -o '[0-9]*')
+            fi
+            
+            if [ ! -z "$HY2_PORT" ]; then
+                echo "$HY2_PORT" >> $temp_active_ports
+                echo -e "${GREEN}检测到Hysteria-2端口: ${HY2_PORT}${NC}"
+                active_ports+=("$HY2_PORT")
+            fi
+        elif [ -f "/etc/hysteria/server.json" ]; then
+            # 旧版本配置文件
+            HY2_PORT=$(grep -o '"listen": "[^"]*"' /etc/hysteria/server.json | grep -o '[0-9]*')
+            if [ -z "$HY2_PORT" ]; then
+                # 尝试另一种格式
+                HY2_PORT=$(grep -o '"listen": ":.*"' /etc/hysteria/server.json | grep -o '[0-9]*')
+            fi
+            
+            if [ ! -z "$HY2_PORT" ]; then
+                echo "$HY2_PORT" >> $temp_active_ports
+                echo -e "${GREEN}检测到Hysteria-2端口: ${HY2_PORT}${NC}"
+                active_ports+=("$HY2_PORT")
+            fi
+        fi
+        
+        # 添加常用系统端口（仅记录端口号，不添加到active_ports数组）
+        echo "22" >> $temp_active_ports  # SSH
+        echo "80" >> $temp_active_ports  # HTTP
+        echo "443" >> $temp_active_ports # HTTPS
+        
+        # 去重
+        sort -u $temp_active_ports -o $temp_active_ports
+    }
+    
+    # 收集活跃端口
+    collect_active_ports
+    
+    # 添加活跃端口到防火墙
+    for port in "${active_ports[@]}"; do
+        case $firewall_type in
+            ufw) 
+                ufw status | grep -q "$port/tcp" || ufw allow $port/tcp
+                ufw status | grep -q "$port/udp" || ufw allow $port/udp
+                ;;
+            firewalld) 
+                firewall-cmd --list-ports | grep -q "$port/tcp" || firewall-cmd --permanent --add-port=$port/tcp
+                firewall-cmd --list-ports | grep -q "$port/udp" || firewall-cmd --permanent --add-port=$port/udp
+                ;;
+            iptables) 
+                port_rule_exists $port "tcp" || iptables -A INPUT -p tcp --dport $port -j ACCEPT
+                port_rule_exists $port "udp" || iptables -A INPUT -p udp --dport $port -j ACCEPT
+                # IPv6规则
+                if command -v ip6tables &>/dev/null; then
+                    ip6tables -L INPUT -n | grep -q "tcp dpt:$port" || ip6tables -A INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null || true
+                    ip6tables -L INPUT -n | grep -q "udp dpt:$port" || ip6tables -A INPUT -p udp --dport $port -j ACCEPT 2>/dev/null || true
+                fi
+                ;;
+        esac
+        echo -e "${GREEN}已添加/验证端口 ${port} 规则${NC}"
+        ports_added=1
+    done
+    
+    # 单独添加常用系统端口（仅TCP）
+    echo -e "${YELLOW}添加常用端口...${NC}"
+    
+    # SSH, HTTP, HTTPS (仅TCP)
+    case $firewall_type in
+        ufw) 
+            ufw status | grep -q "22/tcp" || ufw allow 22/tcp
+            ufw status | grep -q "80/tcp" || ufw allow 80/tcp
+            ufw status | grep -q "443/tcp" || ufw allow 443/tcp
+            ;;
+        firewalld) 
+            firewall-cmd --list-ports | grep -q "22/tcp" || firewall-cmd --permanent --add-port=22/tcp
+            firewall-cmd --list-ports | grep -q "80/tcp" || firewall-cmd --permanent --add-port=80/tcp
+            firewall-cmd --list-ports | grep -q "443/tcp" || firewall-cmd --permanent --add-port=443/tcp
+            ;;
+        iptables) 
+            port_rule_exists 22 "tcp" || iptables -A INPUT -p tcp --dport 22 -j ACCEPT
+            port_rule_exists 80 "tcp" || iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+            port_rule_exists 443 "tcp" || iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+            # IPv6规则
+            if command -v ip6tables &>/dev/null; then
+                ip6tables -L INPUT -n | grep -q "tcp dpt:22" || ip6tables -A INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null || true
+                ip6tables -L INPUT -n | grep -q "tcp dpt:80" || ip6tables -A INPUT -p tcp --dport 80 -j ACCEPT 2>/dev/null || true
+                ip6tables -L INPUT -n | grep -q "tcp dpt:443" || ip6tables -A INPUT -p tcp --dport 443 -j ACCEPT 2>/dev/null || true
+            fi
+            ;;
+    esac
+    
+    # 检查并清理不再活跃的端口规则（可选功能）
+    echo -e "${YELLOW}检查不再活跃的端口规则...${NC}"
+    
+    if [[ "$firewall_type" == "iptables" ]]; then
+        # 获取当前iptables中的所有端口规则
+        current_tcp_ports=$(iptables -L INPUT -n | grep "tcp dpt:" | grep -o 'dpt:[0-9]*' | cut -d':' -f2 | sort -u)
+        current_udp_ports=$(iptables -L INPUT -n | grep "udp dpt:" | grep -o 'dpt:[0-9]*' | cut -d':' -f2 | sort -u)
+        
+        # 检查每个TCP端口是否仍然活跃
+        for tcp_port in $current_tcp_ports; do
+            if ! grep -q "^$tcp_port$" $temp_active_ports && [[ "$tcp_port" != "22" ]] && [[ "$tcp_port" != "80" ]] && [[ "$tcp_port" != "443" ]]; then
+                echo -e "${YELLOW}删除不再活跃的TCP端口规则: ${tcp_port}${NC}"
+                iptables -D INPUT -p tcp --dport $tcp_port -j ACCEPT 2>/dev/null || true
+            fi
+        done
+        
+        # 检查每个UDP端口是否仍然活跃
+        for udp_port in $current_udp_ports; do
+            if ! grep -q "^$udp_port$" $temp_active_ports && [[ "$udp_port" != "22" ]] && [[ "$udp_port" != "80" ]] && [[ "$udp_port" != "443" ]]; then
+                echo -e "${YELLOW}删除不再活跃的UDP端口规则: ${udp_port}${NC}"
+                iptables -D INPUT -p udp --dport $udp_port -j ACCEPT 2>/dev/null || true
+            fi
+        done
+        
+        # 特殊处理：删除22, 80, 443的UDP规则，因为这些通常只需要TCP
+        echo -e "${YELLOW}删除不必要的常用端口UDP规则...${NC}"
+        iptables -D INPUT -p udp --dport 22 -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p udp --dport 80 -j ACCEPT 2>/dev/null || true
+        iptables -D INPUT -p udp --dport 443 -j ACCEPT 2>/dev/null || true
+        
+        # 同样处理IPv6规则
+        if command -v ip6tables &>/dev/null; then
+            current_tcp6_ports=$(ip6tables -L INPUT -n | grep "tcp dpt:" | grep -o 'dpt:[0-9]*' | cut -d':' -f2 | sort -u)
+            current_udp6_ports=$(ip6tables -L INPUT -n | grep "udp dpt:" | grep -o 'dpt:[0-9]*' | cut -d':' -f2 | sort -u)
+            
+            # 检查每个TCP端口是否仍然活跃
+            for tcp_port in $current_tcp6_ports; do
+                if ! grep -q "^$tcp_port$" $temp_active_ports && [[ "$tcp_port" != "22" ]] && [[ "$tcp_port" != "80" ]] && [[ "$tcp_port" != "443" ]]; then
+                    echo -e "${YELLOW}删除不再活跃的IPv6 TCP端口规则: ${tcp_port}${NC}"
+                    ip6tables -D INPUT -p tcp --dport $tcp_port -j ACCEPT 2>/dev/null || true
+                fi
+            done
+            
+            # 检查每个UDP端口是否仍然活跃
+            for udp_port in $current_udp6_ports; do
+                if ! grep -q "^$udp_port$" $temp_active_ports && [[ "$udp_port" != "22" ]] && [[ "$udp_port" != "80" ]] && [[ "$udp_port" != "443" ]]; then
+                    echo -e "${YELLOW}删除不再活跃的IPv6 UDP端口规则: ${udp_port}${NC}"
+                    ip6tables -D INPUT -p udp --dport $udp_port -j ACCEPT 2>/dev/null || true
+                fi
+            done
+            
+            # 特殊处理：删除IPv6的22, 80, 443的UDP规则
+            echo -e "${YELLOW}删除不必要的常用端口IPv6 UDP规则...${NC}"
+            ip6tables -D INPUT -p udp --dport 22 -j ACCEPT 2>/dev/null || true
+            ip6tables -D INPUT -p udp --dport 80 -j ACCEPT 2>/dev/null || true
+            ip6tables -D INPUT -p udp --dport 443 -j ACCEPT 2>/dev/null || true
+        fi
+    fi
+    
+    # 如果是iptables，保存规则
+    if [ "$firewall_type" = "iptables" ]; then
+        if command -v iptables-save >/dev/null 2>&1; then
+            echo -e "${YELLOW}保存防火墙规则...${NC}"
+            if [ -d "/etc/iptables" ]; then
+                iptables-save > /etc/iptables/rules.v4
+            else
+                mkdir -p /etc/iptables
+                iptables-save > /etc/iptables/rules.v4
+            fi
+            
+            # 保存IPv6规则
+            if command -v ip6tables-save >/dev/null 2>&1 && command -v ip6tables >/dev/null 2>&1; then
+                ip6tables-save > /etc/iptables/rules.v6
+            fi
+            echo -e "${GREEN}防火墙规则已保存${NC}"
+        fi
+    fi
+    
+    # 清理临时文件
+    rm -f $temp_active_ports
+    
+    if [ "$ports_added" -eq 0 ]; then
+        echo -e "${YELLOW}未检测到任何已安装的应用端口${NC}"
+    else
+        echo -e "${GREEN}已完成端口配置${NC}"
+    fi
 }
 
 # 端口管理
@@ -2081,18 +2530,19 @@ main() {
         show_banner
         show_main_menu
         
-        read -p "请选择 [0-9]: " OPTION
+        read -p "请选择 [0-10]: " OPTION
         
         case $OPTION in
             1) install_or_reinstall_hysteria2 ;;
             2) install_or_reinstall_3xui ;;
             3) install_or_reinstall_singbox_yg ;;
             4) initialize_server ;;
-            5) uninstall ;;
-            6) show_config ;;  # 这里需要修改为正确的函数名
+            5) firewall_settings ;;
+            6) show_config ;;
             7) system_tools ;;
             8) certificate_management ;;
             9) dns_management ;;
+            10) uninstall ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项，请重试${NC}" ;;
         esac
@@ -2282,7 +2732,6 @@ install_hysteria2() {
 }
 
 # 安装3X-UI
-# 安装3X-UI
 install_3xui() {
     clear
     echo -e "${BLUE}=================================================${NC}"
@@ -2297,25 +2746,20 @@ install_3xui() {
     echo "# 3X-UI安装日志" > $log_file
     echo "# 安装时间: $(date "+%Y-%m-%d %H:%M:%S")" >> $log_file
     
-    # 创建临时文件存储安装输出
-    local temp_output="/tmp/3xui_install_output.txt"
-    
     # 安装3X-UI
     echo -e "${YELLOW}开始安装3X-UI...${NC}"
+    # 创建临时文件存储安装输出
+    local temp_output="/tmp/3xui_install_output.txt"
     wget -N --no-check-certificate https://raw.githubusercontent.com/MHSanaei/3x-ui/refs/tags/v2.5.8/install.sh -O /tmp/3xui_install.sh
     bash /tmp/3xui_install.sh | tee $temp_output
     
     # 等待几秒确保服务启动
     sleep 3
     
-    # 从安装输出中提取关键信息
-    local access_url=$(grep "Access URL:" $temp_output | awk '{print $3}')
-    local username=$(grep "Username:" $temp_output | awk '{print $2}')
-    local password=$(grep "Password:" $temp_output | awk '{print $2}')
-    local port=$(grep "Port:" $temp_output | awk '{print $2}')
-    local webpath=$(grep "WebBasePath:" $temp_output | awk '{print $2}')
+    # 从安装输出提取Access URL
+    local access_url=$(grep -o "Access URL: http://[^ ]*" $temp_output | cut -d' ' -f3)
     
-    # 使用x-ui settings命令获取准确的配置信息（作为备份）
+    # 使用x-ui settings命令获取准确的配置信息
     echo -e "${YELLOW}获取面板配置信息...${NC}"
     x_ui_settings=$(x-ui settings 2>/dev/null)
     
@@ -2326,9 +2770,7 @@ install_3xui() {
     local panel_path=$(echo "$x_ui_settings" | grep -oP "base_path: \K.*" | head -1)
     
     # 更新主安装记录
-    if [ ! -z "$port" ]; then
-        update_main_install_log "3X-UI:${port}"
-    elif [ ! -z "$panel_port" ]; then
+    if [ ! -z "$panel_port" ]; then
         update_main_install_log "3X-UI:${panel_port}"
     else 
         update_main_install_log "3X-UI"
@@ -2341,15 +2783,9 @@ install_3xui() {
     # 优先使用从安装输出中提取的完整Access URL
     if [ ! -z "$access_url" ]; then
         echo -e "  面板地址: $access_url"
-    elif [ ! -z "$port" ] && [ ! -z "$webpath" ]; then
-        echo -e "  面板地址: http://${PUBLIC_IPV4}:${port}/${webpath}"
     elif [ ! -z "$panel_port" ]; then
         if [ ! -z "$panel_path" ] && [ "$panel_path" != "/" ]; then
-            if [[ $panel_path == /* ]]; then
-                echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}${panel_path}"
-            else
-                echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}/${panel_path}"
-            fi
+            echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}${panel_path}"
         else
             echo -e "  面板地址: http://${PUBLIC_IPV4}:${panel_port}"
         fi
@@ -2357,30 +2793,30 @@ install_3xui() {
         echo -e "  面板地址: http://${PUBLIC_IPV4}:2053 (默认端口)"
     fi
     
-    # 优先使用从安装输出中提取的用户名密码
-    if [ ! -z "$username" ] && [ ! -z "$password" ]; then
-        echo -e "  用户名: $username"
-        echo -e "  密码: $password"
-    elif [ ! -z "$panel_user" ] && [ ! -z "$panel_pass" ]; then
+    if [ ! -z "$panel_user" ] && [ ! -z "$panel_pass" ]; then
         echo -e "  用户名: $panel_user"
         echo -e "  密码: $panel_pass"
     else
-        echo -e "  默认用户名: admin"
-        echo -e "  默认密码: admin"
+        # 尝试从安装输出中提取用户名密码
+        local username=$(grep -o "Username: [^ ]*" $temp_output | cut -d' ' -f2)
+        local password=$(grep -o "Password: [^ ]*" $temp_output | cut -d' ' -f2)
+        if [ ! -z "$username" ] && [ ! -z "$password" ]; then
+            echo -e "  用户名: $username"
+            echo -e "  密码: $password"
+        else
+            echo -e "  默认用户名: admin"
+            echo -e "  默认密码: admin"
+        fi
     fi
     
     echo -e "  请登录后立即修改默认密码!"
     
     # 记录到日志文件
-    echo "ACCESS_URL: $access_url" >> $log_file
-    echo "USERNAME: $username" >> $log_file
-    echo "PASSWORD: $password" >> $log_file
-    echo "PORT: $port" >> $log_file
-    echo "WEBPATH: $webpath" >> $log_file
     echo "PANEL_PORT: $panel_port" >> $log_file
     echo "PANEL_PATH: $panel_path" >> $log_file
     echo "PANEL_USER: $panel_user" >> $log_file
     echo "PANEL_PASS: $panel_pass" >> $log_file
+    echo "ACCESS_URL: $access_url" >> $log_file
     
     # 清理临时文件
     rm -f /tmp/3xui_install.sh
