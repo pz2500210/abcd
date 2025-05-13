@@ -3604,3 +3604,20 @@ update_acme_and_certs() {
 
 # 调用主函数
 main
+
+# 创建面板脚本（不依赖install_panel.sh）
+echo -e "${YELLOW}创建服务器管理面板脚本...${NC}"
+
+# 设置执行权限
+chmod +x /usr/local/bin/xx.sh
+
+# 创建快捷命令
+echo -e "${YELLOW}创建快捷命令 'xx'...${NC}"
+ln -sf /usr/local/bin/xx.sh /usr/local/bin/xx
+chmod +x /usr/local/bin/xx
+
+echo -e "${GREEN}服务器管理面板安装完成!${NC}"
+echo -e "${BLUE}=================================================${NC}"
+echo -e "${YELLOW}使用方法:${NC}"
+echo -e "  输入 ${GREEN}xx${NC} 命令启动管理面板"
+echo -e "${BLUE}=================================================${NC}"
