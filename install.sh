@@ -87,6 +87,14 @@ if [ "$(id -u)" != "0" ]; then
     exit 1
 fi
 
+# SSH服务检查（添加到此处）
+if ! command -v sshd &> /dev/null && ! command -v ssh &> /dev/null; then
+    echo -e "${YELLOW}SSH服务未安装，正在安装...${NC}"
+    apt-get update && apt-get install -y openssh-server || yum install -y openssh-server
+    systemctl enable ssh 2>/dev/null || systemctl enable sshd 2>/dev/null
+    systemctl start ssh 2>/dev/null || systemctl start sshd 2>/dev/null
+fi
+
 # 自动检测GitHub仓库URL
 echo -e "${YELLOW}检测GitHub仓库URL...${NC}"
 SCRIPT_URL=$(curl -s -I https://raw.githubusercontent.com/pz2500210/abcd/main/xx.sh | grep -i "location" | cut -d' ' -f2 | tr -d '\r')
@@ -111,22 +119,26 @@ if ! curl -s -I https://raw.githubusercontent.com &> /dev/null; then
     exit 1
 fi
 
-# 修改SSH配置
-echo -e "${YELLOW}修改SSH配置...${NC}"
-# 备份原始SSH配置
-cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+# 修改SSH配置之前先检查文件是否存在
+if [ -f "/etc/ssh/sshd_config" ]; then
+    echo -e "${YELLOW}修改SSH配置...${NC}"
+    # 备份原始SSH配置
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
 
-# 自动修改SSH配置
-sed -i 's/#Port 22/Port 22/' /etc/ssh/sshd_config
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
-sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    # 自动修改SSH配置
+    sed -i 's/#Port 22/Port 22/' /etc/ssh/sshd_config
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+    sed -i 's/PermitRootLogin no/PermitRootLogin yes/' /etc/ssh/sshd_config
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 
-# 重启SSH服务
-systemctl restart sshd
-echo -e "${GREEN}SSH配置已修改完成${NC}"
+    # 重启SSH服务
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+    echo -e "${GREEN}SSH配置已修改完成${NC}"
+else
+    echo -e "${YELLOW}未找到SSH配置文件，跳过SSH配置...${NC}"
+fi
 
 # 下载所有文件
 echo -e "${YELLOW}正在下载必要文件，请稍候...${NC}"
@@ -205,12 +217,12 @@ echo -e "${GREEN}安装完成！请记录以下重要信息：${NC}"
 echo -e "${BLUE}=================================================${NC}"
 
 # 显示SSH登录信息
-SSH_PORT=$(grep "^Port " /etc/ssh/sshd_config | awk '{print $2}')
+SSH_PORT=$(grep "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
 [ -z "$SSH_PORT" ] && SSH_PORT=22
 
 echo -e "${YELLOW}【SSH登录信息】${NC}"
 echo -e "用户名: ${GREEN}root${NC}"
-echo -e "密码: ${GREEN}$(您在安装过程中设置的密码)${NC}"
+echo -e "密码: ${GREEN}您在安装过程中设置的密码${NC}"
 echo -e "SSH端口: ${GREEN}${SSH_PORT}${NC}"
 echo -e "服务器IP: ${GREEN}$(curl -s ifconfig.me || curl -s ip.sb || curl -s ipinfo.io/ip || hostname -I | awk '{print $1}')${NC}"
 
@@ -224,8 +236,16 @@ echo -e "${GREEN}服务器管理面板安装完成!${NC}"
 echo -e "${YELLOW}使用方法:${NC}"
 echo -e "  输入 ${GREEN}xx${NC} 命令启动管理面板"
 echo -e "${BLUE}=================================================${NC}"
-read -p "按回车键继续并启动服务器管理面板..." temp
 
+# 提供运行server_init.sh的选项（添加到此处，在启动xx前）
+echo -e "${YELLOW}是否运行系统初始化配置? (y/n) ${NC}"
+read -p "选择 [y/n]: " RUN_INIT
+if [[ "$RUN_INIT" =~ ^[Yy]$ ]]; then
+    bash /root/server_init.sh
+    echo -e "${GREEN}系统初始化完成，现在启动管理面板...${NC}"
+fi
+
+read -p "按回车键继续并启动服务器管理面板..." temp
 echo -e "${GREEN}正在启动服务器管理面板...${NC}"
 
 # 直接启动XX面板

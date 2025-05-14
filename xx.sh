@@ -1280,12 +1280,12 @@ firewall_settings() {
                 firewalld) firewall-cmd --state ;;
                 iptables) 
                     echo -e "${YELLOW}iptables规则 (IPv4):${NC}"
-                    iptables -L -n
+                    iptables -L INPUT -n -v --line-numbers
                     
                     # 检查并显示IPv6规则
                     if command -v ip6tables &>/dev/null; then
                         echo -e "\n${YELLOW}ip6tables规则 (IPv6):${NC}"
-                        ip6tables -L -n
+                        ip6tables -L INPUT -n -v --line-numbers
                     fi
                     ;;
             esac
@@ -2676,10 +2676,17 @@ main() {
         exit 1
     fi
 
-    if [ ! -f "/root/install_panel.sh" ]; then
-        echo -e "${RED}错误: 找不到install_panel.sh文件${NC}"
-        echo -e "${YELLOW}尝试重新运行安装脚本${NC}"
+    # 面板已安装，无需检查install_panel.sh
+    if [ ! -f "/usr/local/bin/xx.sh" ]; then
+        echo -e "${RED}错误: 找不到xx.sh文件${NC}"
+        echo -e "尝试重新运行安装脚本"
         exit 1
+    fi
+    # 确保xx命令存在
+    if [ ! -f "/usr/local/bin/xx" ]; then
+        echo -e "${YELLOW}创建快捷命令 'xx'...${NC}"
+        ln -sf /usr/local/bin/xx.sh /usr/local/bin/xx
+        chmod +x /usr/local/bin/xx
     fi
 
     # 确保日志目录存在
@@ -3604,20 +3611,3 @@ update_acme_and_certs() {
 
 # 调用主函数
 main
-
-# 创建面板脚本（不依赖install_panel.sh）
-echo -e "${YELLOW}创建服务器管理面板脚本...${NC}"
-
-# 设置执行权限
-chmod +x /usr/local/bin/xx.sh
-
-# 创建快捷命令
-echo -e "${YELLOW}创建快捷命令 'xx'...${NC}"
-ln -sf /usr/local/bin/xx.sh /usr/local/bin/xx
-chmod +x /usr/local/bin/xx
-
-echo -e "${GREEN}服务器管理面板安装完成!${NC}"
-echo -e "${BLUE}=================================================${NC}"
-echo -e "${YELLOW}使用方法:${NC}"
-echo -e "  输入 ${GREEN}xx${NC} 命令启动管理面板"
-echo -e "${BLUE}=================================================${NC}"
