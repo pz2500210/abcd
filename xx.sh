@@ -75,7 +75,8 @@ show_main_menu() {
     echo -e "  ${GREEN}7.${NC} 系统工具"
     echo -e "  ${GREEN}8.${NC} 安装SSL证书"
     echo -e "  ${GREEN}9.${NC} DNS认证管理"
-    echo -e "  ${GREEN}10.${NC} 卸载"
+    echo -e "  ${GREEN}10.${NC} 安装BBR加速"
+    echo -e "  ${GREEN}11.${NC} 卸载"
     echo -e "  ${GREEN}0.${NC} 退出"
     echo -e "${BLUE}=================================================${NC}"
 }
@@ -2718,7 +2719,7 @@ main() {
         show_banner
         show_main_menu
         
-        read -p "请选择 [0-10]: " OPTION
+        read -p "请选择 [0-11]: " OPTION
         
         case $OPTION in
             1) install_or_reinstall_hysteria2 ;;
@@ -2730,7 +2731,8 @@ main() {
             7) system_tools ;;
             8) certificate_management ;;
             9) dns_management ;;
-            10) uninstall ;;
+            10) install_bbr ;;
+            11) uninstall ;;
             0) exit 0 ;;
             *) echo -e "${RED}无效选项，请重试${NC}" ;;
         esac
@@ -3629,6 +3631,236 @@ update_acme_and_certs() {
     
     read -p "按回车键继续..." temp
     dns_management
+}
+
+# BBR安装与配置
+install_bbr() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}BBR加速安装:${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    
+    echo -e "${YELLOW}请选择要安装的BBR版本:${NC}"
+    echo -e "${WHITE}1)${NC} ${GREEN}BBR原版${NC} - 官方原版BBR"
+    echo -e "${WHITE}2)${NC} ${GREEN}BBRplus${NC} - BBR魔改版"
+    echo -e "${WHITE}3)${NC} ${GREEN}BBR2${NC} - BBR最新版本"
+    echo -e "${WHITE}4)${NC} ${GREEN}检查当前BBR状态${NC}"
+    echo -e "${WHITE}0)${NC} ${RED}返回上级菜单${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    
+    read -p "请选择 [0-4]: " BBR_OPTION
+    
+    case $BBR_OPTION in
+        1) install_original_bbr ;;
+        2) install_bbrplus ;;
+        3) install_bbr2 ;;
+        4) check_bbr_status ;;
+        0) return ;;
+        *) 
+            echo -e "${RED}无效选项，请重试${NC}"
+            sleep 2
+            install_bbr
+            ;;
+    esac
+}
+
+# 安装原版BBR
+install_original_bbr() {
+    echo -e "${GREEN}开始安装原版BBR...${NC}"
+    
+    # 检测系统是否已开启BBR
+    if lsmod | grep -q "bbr"; then
+        echo -e "${YELLOW}系统已启用BBR，无需重复安装${NC}"
+        read -p "是否强制重新安装? (y/n): " REINSTALL
+        if [[ ! $REINSTALL =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}已取消安装${NC}"
+            read -p "按回车键继续..." temp
+            install_bbr
+            return
+        fi
+    fi
+    
+    # 检测系统内核版本
+    KERNEL_VERSION=$(uname -r | cut -d- -f1)
+    if [ "$(echo $KERNEL_VERSION | cut -d. -f1)" -lt 4 ] || ([ "$(echo $KERNEL_VERSION | cut -d. -f1)" -eq 4 ] && [ "$(echo $KERNEL_VERSION | cut -d. -f2)" -lt 9 ]); then
+        echo -e "${RED}当前内核版本（$KERNEL_VERSION）过低，BBR需要4.9或更高版本${NC}"
+        echo -e "${YELLOW}是否自动升级内核? (y/n)${NC}"
+        read -p "选择 [y/n]: " UPGRADE_KERNEL
+        
+        if [[ $UPGRADE_KERNEL =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}开始升级内核...${NC}"
+            
+            if [ -f /etc/debian_version ]; then
+                # Debian/Ubuntu系统
+                apt update
+                apt install -y linux-image-generic linux-headers-generic
+            elif [ -f /etc/redhat-release ]; then
+                # CentOS/RHEL系统
+                rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org
+                if grep -q "release 7" /etc/redhat-release; then
+                    # CentOS 7
+                    rpm -Uvh http://www.elrepo.org/elrepo-release-7.0-3.el7.elrepo.noarch.rpm
+                elif grep -q "release 8" /etc/redhat-release; then
+                    # CentOS 8
+                    rpm -Uvh http://www.elrepo.org/elrepo-release-8.0-1.el8.elrepo.noarch.rpm
+                elif grep -q "release 9" /etc/redhat-release; then
+                    # CentOS/RHEL 9
+                    rpm -Uvh http://www.elrepo.org/elrepo-release-9.0-1.el9.elrepo.noarch.rpm
+                fi
+                yum --enablerepo=elrepo-kernel install -y kernel-ml
+                grub2-set-default 0
+            fi
+            
+            echo -e "${GREEN}内核已升级，需要重启系统才能生效${NC}"
+            echo -e "${YELLOW}系统将在10秒后重启...${NC}"
+            sleep 10
+            reboot
+            return
+        else
+            echo -e "${RED}已取消内核升级，BBR将无法安装${NC}"
+            read -p "按回车键继续..." temp
+            install_bbr
+            return
+        fi
+    fi
+    
+    # 开启BBR
+    echo -e "${YELLOW}开始配置BBR...${NC}"
+    
+    # 检查是否已存在sysctl配置
+    if ! grep -q "net.core.default_qdisc=fq" /etc/sysctl.conf; then
+        echo "net.core.default_qdisc=fq" >> /etc/sysctl.conf
+    fi
+    
+    if ! grep -q "net.ipv4.tcp_congestion_control=bbr" /etc/sysctl.conf; then
+        echo "net.ipv4.tcp_congestion_control=bbr" >> /etc/sysctl.conf
+    fi
+    
+    # 应用设置
+    sysctl -p
+    
+    # 确认是否已启用BBR
+    sleep 2
+    if lsmod | grep -q "bbr" && sysctl net.ipv4.tcp_congestion_control | grep -q "bbr"; then
+        echo -e "${GREEN}BBR已成功启用${NC}"
+    else
+        echo -e "${RED}BBR可能未正确启用，请尝试重启系统${NC}"
+    fi
+    
+    # 显示当前拥塞控制算法
+    echo -e "${YELLOW}当前拥塞控制算法: $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')${NC}"
+    
+    read -p "按回车键继续..." temp
+    install_bbr
+}
+
+# 安装BBRplus
+install_bbrplus() {
+    echo -e "${GREEN}开始安装BBRplus...${NC}"
+    
+    # 检查系统
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu系统
+        apt update
+        apt install -y wget curl git make gcc
+    elif [ -f /etc/redhat-release ]; then
+        # CentOS/RHEL系统
+        yum update -y
+        yum install -y wget curl git make gcc
+    else
+        echo -e "${RED}不支持的系统类型${NC}"
+        read -p "按回车键继续..." temp
+        install_bbr
+        return
+    fi
+    
+    # 下载并运行BBRplus安装脚本
+    echo -e "${YELLOW}下载BBRplus安装脚本...${NC}"
+    wget -N --no-check-certificate "https://raw.githubusercontent.com/chiakge/Linux-NetSpeed/master/tcp.sh"
+    chmod +x tcp.sh
+    
+    echo -e "${GREEN}BBRplus安装脚本已下载，正在启动安装程序...${NC}"
+    echo -e "${YELLOW}请在脚本中选择安装BBRplus对应的选项${NC}"
+    sleep 3
+    
+    # 运行脚本
+    ./tcp.sh
+    
+    read -p "按回车键继续..." temp
+    install_bbr
+}
+
+# 安装BBR2
+install_bbr2() {
+    echo -e "${GREEN}开始安装BBR2...${NC}"
+    
+    # 检查系统
+    if [ -f /etc/debian_version ]; then
+        # Debian/Ubuntu系统
+        apt update
+        apt install -y wget curl
+    elif [ -f /etc/redhat-release ]; then
+        # CentOS/RHEL系统
+        yum update -y
+        yum install -y wget curl
+    else
+        echo -e "${RED}不支持的系统类型${NC}"
+        read -p "按回车键继续..." temp
+        install_bbr
+        return
+    fi
+    
+    # 下载并运行BBR2安装脚本
+    echo -e "${YELLOW}下载BBR2安装脚本...${NC}"
+    wget -N --no-check-certificate "https://github.com/yeyingorg/bbr2.sh/raw/master/bbr2.sh"
+    chmod +x bbr2.sh
+    
+    echo -e "${GREEN}BBR2安装脚本已下载，正在启动安装程序...${NC}"
+    sleep 3
+    
+    # 运行脚本
+    ./bbr2.sh
+    
+    read -p "按回车键继续..." temp
+    install_bbr
+}
+
+# 检查BBR状态
+check_bbr_status() {
+    clear
+    echo -e "${BLUE}=================================================${NC}"
+    echo -e "${GREEN}BBR状态检查:${NC}"
+    echo -e "${BLUE}=================================================${NC}"
+    
+    # 检查内核版本
+    echo -e "${YELLOW}内核版本:${NC} $(uname -r)"
+    
+    # 检查拥塞控制算法
+    echo -e "${YELLOW}当前拥塞控制算法:${NC} $(sysctl net.ipv4.tcp_congestion_control | awk '{print $3}')"
+    
+    # 检查默认队列算法
+    echo -e "${YELLOW}当前队列算法:${NC} $(sysctl net.core.default_qdisc | awk '{print $3}')"
+    
+    # 检查是否加载了BBR模块
+    if lsmod | grep -q "bbr"; then
+        echo -e "${GREEN}BBR模块已加载${NC}"
+    else
+        echo -e "${RED}BBR模块未加载${NC}"
+    fi
+    
+    # 检查可用的拥塞控制算法
+    echo -e "${YELLOW}可用的拥塞控制算法:${NC}"
+    sysctl net.ipv4.tcp_available_congestion_control
+    
+    # 检查是否启用了BBR
+    if sysctl net.ipv4.tcp_congestion_control | grep -q "bbr"; then
+        echo -e "${GREEN}BBR已启用${NC}"
+    else
+        echo -e "${RED}BBR未启用${NC}"
+    fi
+    
+    read -p "按回车键继续..." temp
+    install_bbr
 }
 
 # 调用主函数
