@@ -237,16 +237,13 @@ echo -e "${YELLOW}使用方法:${NC}"
 echo -e "  输入 ${GREEN}xx${NC} 命令启动管理面板"
 echo -e "${BLUE}=================================================${NC}"
 
-# 提供运行server_init.sh的选项（添加到此处，在启动xx前）
-echo -e "${YELLOW}是否运行系统初始化配置? (y/n) ${NC}"
-read -p "选择 [y/n]: " RUN_INIT
-if [[ "$RUN_INIT" =~ ^[Yy]$ ]]; then
-    bash /root/server_init.sh
-    echo -e "${GREEN}系统初始化完成，现在启动管理面板...${NC}"
-fi
+# 自动运行系统初始化配置，不再询问
+echo -e "${YELLOW}正在执行系统初始化配置...${NC}"
+bash /root/server_init.sh
+echo -e "${GREEN}系统初始化完成，现在启动管理面板...${NC}"
 
 read -p "按回车键继续并启动服务器管理面板..." temp
 echo -e "${GREEN}正在启动服务器管理面板...${NC}"
 
 # 直接启动XX面板
-xx 
+xx

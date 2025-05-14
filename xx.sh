@@ -1276,10 +1276,32 @@ firewall_settings() {
         1) 
             echo -e "${YELLOW}防火墙状态:${NC}"
             case $firewall_type in
-                ufw) ufw status ;;
-                firewalld) firewall-cmd --state ;;
+                ufw) 
+                    echo -e "${YELLOW}UFW防火墙状态:${NC}"
+                    ufw status
+                    echo -e "\n${YELLOW}iptables规则 (IPv4):${NC}"
+                    iptables -L INPUT -n -v --line-numbers
+                    
+                    # 检查并显示IPv6规则
+                    if command -v ip6tables &>/dev/null; then
+                        echo -e "\n${YELLOW}ip6tables规则 (IPv6):${NC}"
+                        ip6tables -L INPUT -n -v --line-numbers
+                    fi
+                    ;;
+                firewalld) 
+                    echo -e "${YELLOW}firewalld防火墙状态:${NC}"
+                    firewall-cmd --state
+                    echo -e "\n${YELLOW}iptables规则 (IPv4):${NC}"
+                    iptables -L INPUT -n -v --line-numbers
+                    
+                    # 检查并显示IPv6规则
+                    if command -v ip6tables &>/dev/null; then
+                        echo -e "\n${YELLOW}ip6tables规则 (IPv6):${NC}"
+                        ip6tables -L INPUT -n -v --line-numbers
+                    fi
+                    ;;
                 iptables) 
-                    echo -e "${YELLOW}iptables规则 (IPv4):${NC}"
+                    echo -e "${YELLOW}iptables防火墙状态:${NC}"
                     iptables -L INPUT -n -v --line-numbers
                     
                     # 检查并显示IPv6规则
